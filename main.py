@@ -7,10 +7,6 @@ from dotenv import load_dotenv
 import openai
 
 load_dotenv()
-# Dummy AI review function for testing
-async def generate_code_review(diff: str) -> str:
-    # Dummy AI review just echoes the diff length for testing
-    return f"AI Review: The diff contains {len(diff)} characters."
 
 app = FastAPI()
 
@@ -31,7 +27,6 @@ if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY environment variable not set!")
 
 HEADERS = {"PRIVATE-TOKEN": GITLAB_TOKEN}
-
 openai.api_key = OPENAI_API_KEY
 
 class MergeRequestInput(BaseModel):
@@ -51,9 +46,26 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
             json={"branch": new_branch_name, "ref": source_branch}
         )
         if branch_resp.status_code not in [200, 201]:
-            # If branch already exists, consider continuing or raising error
-            # Let's raise error for clarity
             raise Exception(f"Branch creation failed: {branch_resp.status_code} {branch_resp.text}")
+
+        # Commit dummy change to new branch so MR has changes
+        commit_resp = await client.post(
+            f"https://gitlab.com/api/v4/projects/{project_id}/repository/commits",
+            headers=HEADERS,
+            json={
+                "branch": new_branch_name,
+                "commit_message": "Add dummy file for AI review",
+                "actions": [
+                    {
+                        "action": "create",
+                        "file_path": "dummy_file_for_ai_review.txt",
+                        "content": "This is a dummy file to trigger AI code review."
+                    }
+                ]
+            }
+        )
+        if commit_resp.status_code not in [200, 201]:
+            raise Exception(f"Commit failed: {commit_resp.status_code} {commit_resp.text}")
 
         # Create Merge Request
         mr_resp = await client.post(
@@ -115,7 +127,7 @@ async def generate_code_review(diff: str) -> str:
 @app.post("/create-branch-mr/")
 async def create_branch_and_mr(input_data: MergeRequestInput):
     try:
-        # Step 1: Create branch and MR
+        # Step 1: Create branch, commit dummy change, and MR
         mr_response = await create_feature_branch_and_mr(
             input_data.project_id,
             input_data.source_branch,
