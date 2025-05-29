@@ -1,13 +1,10 @@
 # openai_review.py
 import os
 from openai import OpenAI
-from openai import OpenAI
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 client = OpenAI()  # reads OPENAI_API_KEY from env automatically
 
 async def generate_code_review(diff: str) -> str:
