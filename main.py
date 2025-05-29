@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import httpx
 from dotenv import load_dotenv
-import openai
+from openai import OpenAI
 
 load_dotenv()
 
@@ -27,7 +27,9 @@ if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY environment variable not set!")
 
 HEADERS = {"PRIVATE-TOKEN": GITLAB_TOKEN}
-openai.api_key = OPENAI_API_KEY
+
+# Initialize OpenAI client (reads OPENAI_API_KEY from env automatically)
+client = OpenAI()
 
 class MergeRequestInput(BaseModel):
     project_id: int
@@ -38,9 +40,9 @@ class MergeRequestInput(BaseModel):
     mr_description: str = ""
 
 async def create_feature_branch_and_mr(project_id, source_branch, target_branch, new_branch_name, mr_title, mr_description=""):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as http_client:
         # Create branch
-        branch_resp = await client.post(
+        branch_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/repository/branches",
             headers=HEADERS,
             json={"branch": new_branch_name, "ref": source_branch}
@@ -49,7 +51,7 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
             raise Exception(f"Branch creation failed: {branch_resp.status_code} {branch_resp.text}")
 
         # Commit dummy change to new branch so MR has changes
-        commit_resp = await client.post(
+        commit_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/repository/commits",
             headers=HEADERS,
             json={
@@ -68,7 +70,7 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
             raise Exception(f"Commit failed: {commit_resp.status_code} {commit_resp.text}")
 
         # Create Merge Request
-        mr_resp = await client.post(
+        mr_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests",
             headers=HEADERS,
             json={
@@ -84,8 +86,8 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
         return mr_resp.json()
 
 async def get_mr_diff(project_id, mr_iid):
-    async with httpx.AsyncClient() as client:
-        diff_resp = await client.get(
+    async with httpx.AsyncClient() as http_client:
+        diff_resp = await http_client.get(
             f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes",
             headers=HEADERS
         )
@@ -97,8 +99,8 @@ async def get_mr_diff(project_id, mr_iid):
         return "\n".join(diffs)
 
 async def post_gitlab_mr_comment(project_id, mr_iid, comment):
-    async with httpx.AsyncClient() as client:
-        comment_resp = await client.post(
+    async with httpx.AsyncClient() as http_client:
+        comment_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes",
             headers=HEADERS,
             json={"body": comment}
@@ -110,12 +112,16 @@ async def post_gitlab_mr_comment(project_id, mr_iid, comment):
 async def generate_code_review(diff: str) -> str:
     if not diff.strip():
         return "No changes detected in the merge request to review."
-    prompt = f"Please provide a detailed code review for the following git diff:\n{diff}\n\n" \
-             "Highlight issues, suggest improvements, and give best practices."
+    system_prompt = "You are a senior software engineer performing code review. Provide detailed feedback."
+    prompt = f"Here is the git diff:\n{diff}\nPlease highlight issues, suggest improvements, and give best practices."
+
     try:
-        response = await openai.ChatCompletion.acreate(
+        response = await client.chat.completions.acreate(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=500,
             temperature=0.3,
         )
@@ -140,6 +146,11 @@ async def create_branch_and_mr(input_data: MergeRequestInput):
 
         # Step 2: Get MR diff
         diff = await get_mr_diff(input_data.project_id, mr_iid)
+
+        # Debug logs
+        print("----- DIFF START -----")
+        print(diff)
+        print("------ DIFF END ------")
 
         # Step 3: Generate AI review
         review_comment = await generate_code_review(diff)

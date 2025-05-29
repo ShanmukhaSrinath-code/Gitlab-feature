@@ -50,7 +50,6 @@ async def post_gitlab_mr_comment(project_id: int, mr_iid: int, comment: str):
         return resp.json()
 
 
-
 async def create_feature_branch_and_mr(project_id: int, source_branch: str, feature_branch: str, title: str, description: str):
     # Create the feature branch
     branch = await create_branch(project_id, source_branch, feature_branch)
@@ -59,3 +58,8 @@ async def create_feature_branch_and_mr(project_id: int, source_branch: str, feat
     mr = await create_merge_request(project_id, feature_branch, source_branch, title, description)
     
     return mr
+
+# Dummy async function added
+async def dummy_function():
+    print("This is a dummy function.")
+    return "Dummy function completed."
