@@ -171,3 +171,8 @@ async def create_branch_and_mr(input_data: MergeRequestInput):
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
+def dummy_function():
+    """
+    This is a dummy function that returns a greeting message.
+    """
+    return "Hello from dummy function!"
