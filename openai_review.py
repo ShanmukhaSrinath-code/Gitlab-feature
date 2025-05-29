@@ -12,7 +12,7 @@ async def generate_code_review(diff: str) -> str:
 
     prompt = f"Here is the code diff:\n\n{diff}\n\nPlease review it and suggest improvements."
 
-    response = await client.chat.completions.acreate(
+    response = await client.chat.completions.create(
         model="gpt-4o-mini",  # or "gpt-4"
         messages=[
             {"role": "system", "content": system_prompt},
