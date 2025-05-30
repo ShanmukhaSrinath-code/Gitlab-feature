@@ -171,3 +171,13 @@ async def create_branch_and_mr(input_data: MergeRequestInput):
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
+def dummy_workflow_test():
+    """
+    Dummy function to test the Git workflow.
+    Prints a confirmation message.
+    """
+    print("Dummy workflow test function executed successfully!")
+
+# Uncomment below to test when running main.py directly
+# if __name__ == "__main__":
+#     dummy_workflow_test()
