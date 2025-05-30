@@ -28,8 +28,7 @@ if not OPENAI_API_KEY:
 
 HEADERS = {"PRIVATE-TOKEN": GITLAB_TOKEN}
 
-# Initialize OpenAI client (reads OPENAI_API_KEY from env automatically)
-client = OpenAI()
+client = OpenAI()  # Automatically reads OPENAI_API_KEY
 
 class MergeRequestInput(BaseModel):
     project_id: int
@@ -41,7 +40,7 @@ class MergeRequestInput(BaseModel):
 
 async def create_feature_branch_and_mr(project_id, source_branch, target_branch, new_branch_name, mr_title, mr_description=""):
     async with httpx.AsyncClient() as http_client:
-        # Create branch
+        # Create new branch
         branch_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/repository/branches",
             headers=HEADERS,
@@ -50,7 +49,7 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
         if branch_resp.status_code not in [200, 201]:
             raise Exception(f"Branch creation failed: {branch_resp.status_code} {branch_resp.text}")
 
-        # Commit dummy change to new branch so MR has changes
+        # Commit dummy file to ensure diff exists
         commit_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/repository/commits",
             headers=HEADERS,
@@ -69,7 +68,7 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
         if commit_resp.status_code not in [200, 201]:
             raise Exception(f"Commit failed: {commit_resp.status_code} {commit_resp.text}")
 
-        # Create Merge Request
+        # Create MR
         mr_resp = await http_client.post(
             f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests",
             headers=HEADERS,
@@ -85,7 +84,7 @@ async def create_feature_branch_and_mr(project_id, source_branch, target_branch,
 
         return mr_resp.json()
 
-async def get_mr_diff(project_id, mr_iid):
+async def get_mr_changes(project_id, mr_iid):
     async with httpx.AsyncClient() as http_client:
         diff_resp = await http_client.get(
             f"https://gitlab.com/api/v4/projects/{project_id}/merge_requests/{mr_iid}/changes",
@@ -93,10 +92,7 @@ async def get_mr_diff(project_id, mr_iid):
         )
         if diff_resp.status_code != 200:
             raise Exception(f"Failed to fetch MR diff: {diff_resp.status_code} {diff_resp.text}")
-
-        changes = diff_resp.json().get("changes", [])
-        diffs = [change.get("diff", "") for change in changes]
-        return "\n".join(diffs)
+        return diff_resp.json().get("changes", [])
 
 async def post_gitlab_mr_comment(project_id, mr_iid, comment):
     async with httpx.AsyncClient() as http_client:
@@ -111,9 +107,10 @@ async def post_gitlab_mr_comment(project_id, mr_iid, comment):
 
 async def generate_code_review(diff: str) -> str:
     if not diff.strip():
-        return "No changes detected in the merge request to review."
+        return "No diff content to review."
+
     system_prompt = "You are a senior software engineer performing code review. Provide detailed feedback."
-    prompt = f"Here is the git diff:\n{diff}\nPlease highlight issues, suggest improvements, and give best practices."
+    prompt = f"Here is the code diff:\n{diff}\nPlease highlight issues, suggest improvements, and give best practices."
 
     try:
         response = await client.chat.completions.acreate(
@@ -125,15 +122,14 @@ async def generate_code_review(diff: str) -> str:
             max_tokens=500,
             temperature=0.3,
         )
-        review_text = response.choices[0].message.content.strip()
-        return review_text
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Failed to generate code review: {str(e)}"
 
 @app.post("/create-branch-mr/")
 async def create_branch_and_mr(input_data: MergeRequestInput):
     try:
-        # Step 1: Create branch, commit dummy change, and MR
+        # Step 1: Create branch, commit, MR
         mr_response = await create_feature_branch_and_mr(
             input_data.project_id,
             input_data.source_branch,
@@ -144,25 +140,29 @@ async def create_branch_and_mr(input_data: MergeRequestInput):
         )
         mr_iid = mr_response["iid"]
 
-        # Step 2: Get MR diff
-        diff = await get_mr_diff(input_data.project_id, mr_iid)
+        # Step 2: Fetch changes (diffs) file by file
+        changes = await get_mr_changes(input_data.project_id, mr_iid)
 
-        # Debug logs
-        print("----- DIFF START -----")
-        print(diff)
-        print("------ DIFF END ------")
+        all_reviews = []
+        for change in changes:
+            file_path = change.get("new_path") or change.get("old_path")
+            diff = change.get("diff", "")
+            if diff.strip():
+                review = await generate_code_review(diff)
+                review_block = f"### Review for `{file_path}`\n{review}"
+                all_reviews.append(review_block)
 
-        # Step 3: Generate AI review
-        review_comment = await generate_code_review(diff)
+        # Combine all reviews
+        final_review_comment = "### AI Code Review\n\n" + "\n\n".join(all_reviews)
 
-        # Step 4: Post AI review comment on GitLab MR
-        await post_gitlab_mr_comment(input_data.project_id, mr_iid, review_comment)
+        # Step 3: Post the comment on the MR
+        await post_gitlab_mr_comment(input_data.project_id, mr_iid, final_review_comment)
 
-        # Return MR info + review text
+        # Step 4: Return response
         return {
             "message": "Merge Request created and reviewed",
             "merge_request": mr_response,
-            "ai_code_review": review_comment
+            "ai_code_review": final_review_comment
         }
 
     except Exception as e:
@@ -171,13 +171,3 @@ async def create_branch_and_mr(input_data: MergeRequestInput):
 @app.get("/ping")
 def ping():
     return {"status": "ok"}
-def dummy_function():
-    """
-    This is a dummy function that returns a greeting message.
-    """
-    return "Hello from dummy function!"
-def dummy_function():
-    """
-    This is a dummy function that returns a greeting message.
-    """
-    return "Hello from dummy function,,,,,,,,,,Yes!"
