@@ -63,3 +63,5 @@ async def create_feature_branch_and_mr(project_id: int, source_branch: str, feat
 async def dummy_function():
     print("This is a dummy function.")
     return "Dummy function completed."
+# inside main.py
+
