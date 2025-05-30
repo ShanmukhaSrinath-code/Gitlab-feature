@@ -176,7 +176,7 @@ def dummy_workflow_test():
     Dummy function to test the Git workflow.
     Prints a confirmation message.
     """
-    print("Dummy workflow test function executed successfully!")
+    print("Dummy workflow test function executed successfully!....................yes")
 
 # Uncomment below to test when running main.py directly
 # if __name__ == "__main__":
